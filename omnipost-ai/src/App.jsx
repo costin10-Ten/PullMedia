@@ -157,7 +157,7 @@ export default function App() {
     setGenerating(true);
     setGenerateError(null);
 
-    const { data, error } = await supabase.functions.invoke('generate-post', {
+    const { data, error } = await supabase.functions.invoke('rapid-endpoint', {
       body: { draftText: article },
     });
 
