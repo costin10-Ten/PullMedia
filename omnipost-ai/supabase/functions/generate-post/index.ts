@@ -3,7 +3,7 @@
 // Deployed via: supabase functions deploy generate-post
 // Secret needed: supabase secrets set GEMINI_API_KEY=<your-key>
 
-const GEMINI_MODEL = 'gemini-3.1-flash-lite-preview';
+const GEMINI_MODEL = 'gemini-3.1-flash-lite-preview'; // https://ai.google.dev/gemini-api/docs/models/gemini-3.1-flash-lite-preview
 const GEMINI_URL =
   `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`;
 
