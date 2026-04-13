@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import {
   Sparkles,
   CalendarClock,
@@ -11,7 +11,10 @@ import {
   Send,
   Trash2,
   ChevronRight,
+  RefreshCw,
+  AlertCircle,
 } from 'lucide-react';
+import { supabase } from './lib/supabase';
 
 // ─── Platform config ──────────────────────────────────────────────────────────
 const PLATFORMS = [
@@ -129,32 +132,34 @@ export default function App() {
     line: '',
   });
   const [activeTab, setActiveTab] = useState('facebook');
-  const [posts, setPosts] = useState([
-    {
-      id: 1,
-      platform: 'facebook',
-      content:
-        '🌟 【品牌故事】我們從一個小車庫起步，憑著對品質的堅持打造出今天的產品線...',
-      scheduledAt: '2026-04-15T09:00',
-      status: 'published',
-    },
-    {
-      id: 2,
-      platform: 'instagram',
-      content:
-        '✨ 每一個成功的背後，都是無數次的嘗試與堅持 #品牌 #創業 #台灣',
-      scheduledAt: '2026-04-16T12:00',
-      status: 'pending',
-    },
-    {
-      id: 3,
-      platform: 'line',
-      content:
-        '嗨！今天有個好消息要告訴大家 😊 我們推出了全新的產品系列，快來看看！',
-      scheduledAt: '2026-04-17T10:30',
-      status: 'pending',
-    },
-  ]);
+
+  // ── Supabase state ─────────────────────────────────────────────────────────
+  const [posts, setPosts] = useState([]);
+  const [loadingPosts, setLoadingPosts] = useState(true);
+  const [fetchError, setFetchError] = useState(null);
+  const [scheduling, setScheduling] = useState(false);
+  const [scheduleError, setScheduleError] = useState(null);
+
+  // ── Fetch posts from Supabase ──────────────────────────────────────────────
+  const fetchPosts = useCallback(async () => {
+    setLoadingPosts(true);
+    setFetchError(null);
+    const { data, error } = await supabase
+      .from('posts')
+      .select('*')
+      .order('scheduled_time', { ascending: true });
+
+    if (error) {
+      setFetchError(error.message);
+    } else {
+      setPosts(data ?? []);
+    }
+    setLoadingPosts(false);
+  }, []);
+
+  useEffect(() => {
+    fetchPosts();
+  }, [fetchPosts]);
 
   // ── Generate (fake) ────────────────────────────────────────────────────────
   const handleGenerate = () => {
@@ -166,30 +171,45 @@ export default function App() {
     }, 1200);
   };
 
-  // ── Add to schedule ────────────────────────────────────────────────────────
-  const handleSchedule = () => {
-    const newPosts = [];
+  // ── Add to schedule → write to Supabase ───────────────────────────────────
+  const handleSchedule = async () => {
+    const rows = [];
     PLATFORMS.forEach(({ id }) => {
       if (contents[id] && schedules[id]) {
-        newPosts.push({
-          id: Date.now() + Math.random(),
+        rows.push({
           platform: id,
           content: contents[id],
-          scheduledAt: schedules[id],
+          scheduled_time: new Date(schedules[id]).toISOString(),
           status: 'pending',
         });
       }
     });
-    if (newPosts.length === 0) return;
-    setPosts((prev) => [...newPosts, ...prev]);
-    setContents({ facebook: '', instagram: '', threads: '', line: '' });
-    setSchedules({ facebook: '', instagram: '', threads: '', line: '' });
-    setArticle('');
+    if (rows.length === 0) return;
+
+    setScheduling(true);
+    setScheduleError(null);
+
+    const { error } = await supabase.from('posts').insert(rows);
+
+    if (error) {
+      setScheduleError(error.message);
+    } else {
+      // Reset form
+      setContents({ facebook: '', instagram: '', threads: '', line: '' });
+      setSchedules({ facebook: '', instagram: '', threads: '', line: '' });
+      setArticle('');
+      // Refresh list
+      await fetchPosts();
+    }
+    setScheduling(false);
   };
 
   // ── Delete post ────────────────────────────────────────────────────────────
-  const handleDelete = (id) => {
-    setPosts((prev) => prev.filter((p) => p.id !== id));
+  const handleDelete = async (id) => {
+    const { error } = await supabase.from('posts').delete().eq('id', id);
+    if (!error) {
+      setPosts((prev) => prev.filter((p) => p.id !== id));
+    }
   };
 
   const activePlatform = PLATFORMS.find((p) => p.id === activeTab);
@@ -231,7 +251,7 @@ export default function App() {
         {/* Two-column on lg+ */}
         <div className="flex flex-col lg:flex-row gap-6 lg:gap-8">
 
-          {/* ── LEFT: Article input ─────────────────────────────────────────── */}
+          {/* ── LEFT: Article input ──────────────────────────────────────────── */}
           <section className="w-full lg:w-[42%] flex flex-col gap-4">
             <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-5">
               <div className="flex items-center gap-2 mb-3">
@@ -302,7 +322,7 @@ export default function App() {
                   '貼上您的長篇文章或新聞稿',
                   '點擊「生成素材」，AI 自動產生各平台文案',
                   '切換 Tab 調整文案並設定排程時間',
-                  '點擊「確認並加入排程」完成設定',
+                  '點擊「確認並加入排程」寫入資料庫',
                 ].map((step, i) => (
                   <li key={i} className="flex items-start gap-2">
                     <span className="w-4 h-4 rounded-full bg-indigo-200 text-indigo-700 flex items-center justify-center text-[10px] font-bold shrink-0 mt-0.5">
@@ -335,10 +355,7 @@ export default function App() {
                       }`}
                     >
                       <Icon size={14} />
-                      <span className="hidden xs:inline sm:inline">
-                        {p.label}
-                      </span>
-                      <span className="xs:hidden sm:hidden">{p.label}</span>
+                      {p.label}
                       {hasContent && (
                         <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 shrink-0" />
                       )}
@@ -407,13 +424,48 @@ export default function App() {
             {/* Schedule button */}
             <button
               onClick={handleSchedule}
-              disabled={!canSchedule}
+              disabled={!canSchedule || scheduling}
               className="w-full inline-flex items-center justify-center gap-2 px-6 py-4 rounded-2xl bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-700 hover:to-violet-700 disabled:from-slate-300 disabled:to-slate-300 disabled:cursor-not-allowed text-white font-bold text-sm transition-all shadow-lg shadow-indigo-200 disabled:shadow-none active:scale-95"
             >
-              <Send size={16} />
-              確認並加入排程
+              {scheduling ? (
+                <>
+                  <svg
+                    className="animate-spin h-4 w-4"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                  >
+                    <circle
+                      className="opacity-25"
+                      cx="12"
+                      cy="12"
+                      r="10"
+                      stroke="currentColor"
+                      strokeWidth="4"
+                    />
+                    <path
+                      className="opacity-75"
+                      fill="currentColor"
+                      d="M4 12a8 8 0 018-8v8z"
+                    />
+                  </svg>
+                  儲存中...
+                </>
+              ) : (
+                <>
+                  <Send size={16} />
+                  確認並加入排程
+                </>
+              )}
             </button>
-            {!canSchedule && (
+
+            {scheduleError && (
+              <div className="flex items-start gap-2 text-xs text-red-600 bg-red-50 border border-red-200 rounded-xl px-4 py-3 -mt-2">
+                <AlertCircle size={14} className="shrink-0 mt-0.5" />
+                <span>儲存失敗：{scheduleError}</span>
+              </div>
+            )}
+
+            {!canSchedule && !scheduling && (
               <p className="text-center text-xs text-slate-400 -mt-2 pb-1">
                 請至少在一個平台填寫文案並設定排程時間
               </p>
@@ -426,28 +478,77 @@ export default function App() {
           <div className="flex items-center justify-between mb-5">
             <h2 className="font-bold text-slate-800 text-base flex items-center gap-2">
               <CalendarClock size={18} className="text-indigo-500" />
-              貼文排程列表
+              排程總覽
             </h2>
-            <div className="flex gap-2 text-xs">
-              <span className="px-2.5 py-1 rounded-full bg-amber-100 text-amber-700 font-semibold">
+            <div className="flex items-center gap-2">
+              <span className="hidden sm:inline-flex px-2.5 py-1 rounded-full bg-amber-100 text-amber-700 text-xs font-semibold">
                 {pendingCount} 等待中
               </span>
-              <span className="px-2.5 py-1 rounded-full bg-green-100 text-green-700 font-semibold">
+              <span className="hidden sm:inline-flex px-2.5 py-1 rounded-full bg-green-100 text-green-700 text-xs font-semibold">
                 {publishedCount} 已發佈
               </span>
+              <button
+                onClick={fetchPosts}
+                disabled={loadingPosts}
+                className="p-2 rounded-xl text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 transition-colors disabled:opacity-40"
+                title="重新整理"
+              >
+                <RefreshCw
+                  size={15}
+                  className={loadingPosts ? 'animate-spin' : ''}
+                />
+              </button>
             </div>
           </div>
 
-          {posts.length === 0 ? (
+          {/* Error state */}
+          {fetchError && (
+            <div className="flex items-start gap-2 text-sm text-red-600 bg-red-50 border border-red-200 rounded-2xl px-5 py-4 mb-4">
+              <AlertCircle size={16} className="shrink-0 mt-0.5" />
+              <div>
+                <p className="font-semibold">無法載入排程資料</p>
+                <p className="text-xs mt-0.5 text-red-500">{fetchError}</p>
+              </div>
+            </div>
+          )}
+
+          {/* Loading skeleton */}
+          {loadingPosts && !fetchError && (
+            <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
+              {[1, 2, 3].map((i) => (
+                <div
+                  key={i}
+                  className="bg-white rounded-2xl border border-slate-200 p-4 animate-pulse"
+                >
+                  <div className="flex gap-2 mb-3">
+                    <div className="h-5 w-20 bg-slate-200 rounded-full" />
+                    <div className="h-5 w-16 bg-slate-200 rounded-full" />
+                  </div>
+                  <div className="space-y-2">
+                    <div className="h-3 bg-slate-100 rounded w-full" />
+                    <div className="h-3 bg-slate-100 rounded w-4/5" />
+                    <div className="h-3 bg-slate-100 rounded w-3/5" />
+                  </div>
+                  <div className="h-3 bg-slate-100 rounded w-1/2 mt-4" />
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Empty state */}
+          {!loadingPosts && !fetchError && posts.length === 0 && (
             <div className="text-center py-20 text-slate-400">
               <CalendarClock size={44} className="mx-auto mb-3 opacity-25" />
               <p className="text-sm">尚無排程貼文，快來建立第一則吧！</p>
             </div>
-          ) : (
+          )}
+
+          {/* Post cards */}
+          {!loadingPosts && !fetchError && posts.length > 0 && (
             <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
               {posts.map((post) => {
-                const dt = post.scheduledAt
-                  ? new Date(post.scheduledAt).toLocaleString('zh-TW', {
+                const dt = post.scheduled_time
+                  ? new Date(post.scheduled_time).toLocaleString('zh-TW', {
                       year: 'numeric',
                       month: '2-digit',
                       day: '2-digit',
