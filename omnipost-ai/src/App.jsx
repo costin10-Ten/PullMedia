@@ -10,7 +10,6 @@ import {
   MessageSquare,
   Send,
   Trash2,
-  ChevronRight,
   RefreshCw,
   AlertCircle,
 } from 'lucide-react';
@@ -71,16 +70,6 @@ const PLATFORMS = [
   },
 ];
 
-// ─── Fake AI-generated content ────────────────────────────────────────────────
-const generateFakeContent = (article) => {
-  const preview = article.trim().slice(0, 40);
-  return {
-    facebook: `🌟 【精彩分享】\n\n${preview}...\n\n這是一篇值得細讀的好文！歡迎留言分享您的看法，別忘了按讚 👍 並分享給朋友！\n\n#內容行銷 #品牌故事 #分享`,
-    instagram: `✨ ${preview}...\n\n點擊個人頁連結閱讀全文 🔗\n\n#品牌 #行銷 #內容創作 #社群媒體 #數位行銷 #創業 #台灣 #分享`,
-    threads: `剛讀到一篇很有啟發的文章 🧵\n\n「${preview}...」\n\n你有什麼看法？留言告訴我 👇`,
-    line: `嗨！今天想和大家分享一個有趣的內容 😊\n\n📌 ${preview}...\n\n完整內容請點擊下方連結，喜歡的話記得分享給朋友！\n\n🔗 查看全文`,
-  };
-};
 
 // ─── Status badge ─────────────────────────────────────────────────────────────
 function StatusBadge({ status }) {
@@ -139,6 +128,7 @@ export default function App() {
   const [fetchError, setFetchError] = useState(null);
   const [scheduling, setScheduling] = useState(false);
   const [scheduleError, setScheduleError] = useState(null);
+  const [generateError, setGenerateError] = useState(null);
 
   // ── Fetch posts from Supabase ──────────────────────────────────────────────
   const fetchPosts = useCallback(async () => {
@@ -161,14 +151,28 @@ export default function App() {
     fetchPosts();
   }, [fetchPosts]);
 
-  // ── Generate (fake) ────────────────────────────────────────────────────────
-  const handleGenerate = () => {
+  // ── Generate via Supabase Edge Function → Gemini ──────────────────────────
+  const handleGenerate = async () => {
     if (!article.trim()) return;
     setGenerating(true);
-    setTimeout(() => {
-      setContents(generateFakeContent(article));
-      setGenerating(false);
-    }, 1200);
+    setGenerateError(null);
+
+    const { data, error } = await supabase.functions.invoke('generate-post', {
+      body: { draftText: article },
+    });
+
+    if (error) {
+      setGenerateError(error.message);
+    } else {
+      // Edge Function returns { fb, ig, threads, line }
+      setContents({
+        facebook: data?.fb ?? '',
+        instagram: data?.ig ?? '',
+        threads: data?.threads ?? '',
+        line: data?.line ?? '',
+      });
+    }
+    setGenerating(false);
   };
 
   // ── Add to schedule → write to Supabase ───────────────────────────────────
@@ -310,6 +314,14 @@ export default function App() {
                   )}
                 </button>
               </div>
+
+              {/* Generate error */}
+              {generateError && (
+                <div className="mt-3 flex items-start gap-2 text-xs text-red-600 bg-red-50 border border-red-200 rounded-xl px-4 py-3">
+                  <AlertCircle size={14} className="shrink-0 mt-0.5" />
+                  <span>生成失敗：{generateError}</span>
+                </div>
+              )}
             </div>
 
             {/* Tips */}
